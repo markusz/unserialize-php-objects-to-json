@@ -2,11 +2,19 @@ package main.scala
 
 import java.sql.{Connection, DriverManager}
 
+import com.typesafe.scalalogging.Logger
+import org.slf4j.LoggerFactory
 import spray.json.JsValue
 
 
 object SQL {
   def unserializeAndStoreInAdditionalColumn(sqlConfig: SQLConfig, selectQuery: String, migrationConfig: MigrationConfig) {
+    val logger = Logger(LoggerFactory.getLogger("SQL"))
+
+    if (migrationConfig.simulation) {
+      logger.info("Running in simulation mode (Read-Only). No changes will be written to DB")
+    }
+
     val driver = "com.mysql.jdbc.Driver"
 
     // there's probably a better way to do this
@@ -27,13 +35,12 @@ object SQL {
       while (resultSet.next()) {
         i += 1
         val configRaw: String = resultSet.getString(migrationConfig.dataColumnName)
-        val id = resultSet.getInt("id")
 
         //We deal with references that can not be parsed properly by setting their type to "i"
         def canonicalizeSerializedObject(s: String) = s.replaceAll("\u0000", " ").replaceAll("r:", "i:")
 
         val nodeConfigAsJSON: Option[JsValue] = configRaw match {
-          case s: String => Parsing.parseSerializedPHPObjectToJSONString(canonicalizeSerializedObject(s)) match {
+          case s: String => Parsing.parseSerializedPHPObjectToJSONString(canonicalizeSerializedObject(s), migrationConfig.replaceKeys) match {
             case null =>
               e += 1
               None
@@ -42,15 +49,24 @@ object SQL {
           case _ => None
         }
 
-        val query = "UPDATE adextern.psd_adextern_brands SET " + migrationConfig.jsonTargetColumnName + "=? WHERE id=?;"
-        val preparedStmt = connection2.prepareStatement(query)
-        preparedStmt.setString(1, nodeConfigAsJSON.get.compactPrint)
-        preparedStmt.setInt(2, id)
-        preparedStmt.executeUpdate()
+        val compactPrint: String = nodeConfigAsJSON.get.compactPrint
+        logger.debug("OK: " + compactPrint)
+
+        //ALTER TABLE `ivw_prd`.`piranha_ivw_defaults` ADD COLUMN `dataJSON` LONGTEXT NULL COMMENT '' AFTER `data`;
+
+        if (!migrationConfig.simulation) {
+          val id = resultSet.getInt("id")
+          val qualifiedTable = sqlConfig.db + "." + sqlConfig.table
+          val query = "UPDATE " + qualifiedTable + " SET " + migrationConfig.jsonTargetColumnName + "=? WHERE id=?;"
+          val preparedStmt = connection2.prepareStatement(query)
+          preparedStmt.setString(1, compactPrint)
+          preparedStmt.setInt(2, id)
+          preparedStmt.executeUpdate()
+        }
       }
-      println(s"Unserialized $i entries, Errors: $e (${e.toDouble / i.toDouble}) -----")
+      logger.info(s"Unserialized $i entries, Errors: $e (${e.toDouble / i.toDouble}) -----")
     } catch {
-      case e: Throwable => e.printStackTrace()
+      case e: Throwable => logger.error("Error ", e)
     }
     connection.close()
     connection2.close()
