@@ -1,31 +1,27 @@
 package main.scala
 
 object Main {
+  val DO_SIMULATION = false
+
   def main(args: Array[String]) {
 
-    val db = "ivw_prd"
-    val table = "piranha_ivw_defaults"
-    val qualifiedTableName = db + "." + table
-    val selectQuery: String = "SELECT * FROM " + qualifiedTableName
-
-    val sqlConfig = new SQLConfig(
-      url = "jdbc:mysql://:3306",
-      username = "root",
-      password = "root",
-      db = db,
-      table = table
+    val sqlConfig1 = new SQLConfig(
+      db = "schema_goes_here",
+      table = "table_goes_here"
     )
 
-    val migrationConfig = new MigrationConfig(
-      dataColumnName = "data",
-      jsonTargetColumnName = "dataJSON",
+    val sqlConfig2 = sqlConfig1.copy(db = "another_schema")
+
+    val migrationConfig1 = new MigrationConfig(
       replaceKeys = Seq(
-        (" \\* ", ""),
-        ("PSD\\\\AdExternBundle\\\\Entity\\\\", ""),
-        ("Mineus\\\\NewAgofCodeSystemBundle\\\\Entity\\\\", "")
+        (" \\* ", "")
       ),
-      simulation = false
+      simulation = DO_SIMULATION
     )
-    SQL.unserializeAndStoreInAdditionalColumn(sqlConfig, selectQuery, migrationConfig)
+
+    val migrationConfig2 = migrationConfig1.copy()
+
+    SQL.unserializeAndStoreInAdditionalColumn(sqlConfig1, migrationConfig1)
+    SQL.unserializeAndStoreInAdditionalColumn(sqlConfig2, migrationConfig2)
   }
 }

@@ -8,7 +8,7 @@ import spray.json.JsValue
 
 
 object SQL {
-  def unserializeAndStoreInAdditionalColumn(sqlConfig: SQLConfig, selectQuery: String, migrationConfig: MigrationConfig) {
+  def unserializeAndStoreInAdditionalColumn(sqlConfig: SQLConfig, migrationConfig: MigrationConfig) {
     val logger = Logger(LoggerFactory.getLogger("SQL"))
 
     if (migrationConfig.simulation) {
@@ -17,7 +17,6 @@ object SQL {
 
     val driver = "com.mysql.jdbc.Driver"
 
-    // there's probably a better way to do this
     var connection: Connection = null
     var connection2: Connection = null
 
@@ -26,17 +25,19 @@ object SQL {
       connection = DriverManager.getConnection(sqlConfig.url, sqlConfig.username, sqlConfig.password)
       connection2 = DriverManager.getConnection(sqlConfig.url, sqlConfig.username, sqlConfig.password)
 
-      // create the statement, and run the select query
       val statement = connection.createStatement(java.sql.ResultSet.TYPE_FORWARD_ONLY, java.sql.ResultSet.CONCUR_READ_ONLY)
       statement.setFetchSize(Integer.MIN_VALUE)
-      val resultSet = statement.executeQuery(selectQuery)
+      val resultSet = statement.executeQuery(sqlConfig.makeSelectAll)
       var i = 0
       var e = 0
       while (resultSet.next()) {
         i += 1
         val configRaw: String = resultSet.getString(migrationConfig.dataColumnName)
 
-        //We deal with references that can not be parsed properly by setting their type to "i"
+        /**
+          * - We deal with references that can not be parsed properly by setting their type from "r:" to "i:"
+          * - We escape UTF8 chars that can break the parsing
+          */
         def canonicalizeSerializedObject(s: String) = s.replaceAll("\u0000", " ").replaceAll("r:", "i:")
 
         val nodeConfigAsJSON: Option[JsValue] = configRaw match {
@@ -56,8 +57,7 @@ object SQL {
 
         if (!migrationConfig.simulation) {
           val id = resultSet.getInt("id")
-          val qualifiedTable = sqlConfig.db + "." + sqlConfig.table
-          val query = "UPDATE " + qualifiedTable + " SET " + migrationConfig.jsonTargetColumnName + "=? WHERE id=?;"
+          val query = "UPDATE " + sqlConfig.toQualifiedTable + " SET " + migrationConfig.jsonTargetColumnName + "=? WHERE id=?;"
           val preparedStmt = connection2.prepareStatement(query)
           preparedStmt.setString(1, compactPrint)
           preparedStmt.setInt(2, id)
@@ -72,3 +72,4 @@ object SQL {
     connection2.close()
   }
 }
+
